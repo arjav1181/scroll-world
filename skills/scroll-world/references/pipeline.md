@@ -625,6 +625,27 @@ detect_backends() {
   case "$(poll_cap flux image)" in ok*) echo "poll/flux: FREE+LIVE";; *) echo "poll/flux: DOWN/PAID (mirrors next)";; esac
 }
 
+# keycard <lane> — prints the teach-card for Step 0.9 key onboarding (one lane at a
+# time; full table in SKILL.md Step 0.9). Never print a key itself — only where to get one.
+keycard() {
+  case "$1" in
+    pollinations) echo "1. Open enter.pollinations.ai, sign in (GitHub), Keys -> new sk_ key (free Pollen via Quests/tiers)"
+                  echo "2. Paste it here -> export POLLINATIONS_KEY=sk_..." ;;
+    cloudflare)   echo "1. Sign up at dash.cloudflare.com (no card), copy the account ID from the sidebar"
+                  echo "2. My Profile -> API Tokens -> Create Token (Workers AI access)"
+                  echo "3. Paste them here -> export CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=..." ;;
+    huggingface)  echo "1. Join huggingface.co, Settings -> Access Tokens -> fine-grained read-only token"
+                  echo "2. Paste it here -> export HF_TOKEN=hf_... (also raises Space quotas)" ;;
+    siliconflow)  echo "1. Sign up at cloud.siliconflow.com (no card, ~\$1 trial credit), API keys"
+                  echo "2. Paste it here -> export SILICONFLOW_API_KEY=..." ;;
+    novita)       echo "1. Sign up at novita.ai (no card, ~\$0.50 trial credit), API keys"
+                  echo "2. Paste it here -> export NOVITA_API_KEY=..." ;;
+    monid)        echo "1. Get a key + top-up at monid.ai (pay-per-clip USD, premium lane)"
+                  echo "2. Paste it here -> export per the Monid CLI docs, then: monid balance" ;;
+    *) echo "unknown lane: $1 (pollinations|cloudflare|huggingface|siliconflow|novita|monid)" ;;
+  esac
+}
+
 # probe_video — MANDATORY 30-second Step 0 check, before any real work or frame
 # uploads. Proves whether a video lane is actually callable (key-presence alone
 # proves nothing — keyless video 401s). Burns one tiny upload, zero Pollen on 401.

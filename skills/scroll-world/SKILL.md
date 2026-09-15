@@ -124,6 +124,34 @@ not the framework.
       LTX-Video keyframes. SVD/AnimateDiff are start-frame-only → architecture A only.
     If no GPU is present, say so and steer to the free hosted lane — don't attempt
     local video on CPU.
+9. **Key onboarding — you ask, teach, use, in that order.** Missing keys are a
+    conversation, not a dead end. Flow:
+    1. `detect_backends` first — know what's live before asking for anything.
+    2. When the chosen lane needs a missing key, teach it with the key card below:
+       where to sign up (URL), what it costs (all free/no-card unless marked), which
+       env var it fills. One lane at a time — never dump all six cards at once.
+    3. Ask for the key in plain prose ("paste your Pollinations key — starts with
+       `sk_`, from step 1 above"). The user pastes it in chat; `export` it
+       immediately into the session, validate (last column), and confirm with the
+       last 4 characters only — never print a full key.
+    4. If the user declines, offer the next-best live lane (keyless hfspace stills +
+       §8f previz is always available) — never stall the build on a key.
+    Key cards (`keycard <lane>` in pipeline.md §8e prints the card):
+
+    | Lane | Get it | Costs | Fills | Validate |
+    |---|---|---|---|---|
+    | Pollinations | `enter.pollinations.ai` → sign in (GitHub) → Keys → new `sk_` key; free Pollen via Quests/tiers | $0 | `export POLLINATIONS_KEY=sk_...` | `poll_models` (free) |
+    | Cloudflare | `dash.cloudflare.com/sign-up` → account ID (sidebar) + My Profile → API Tokens → Create Token (Workers AI) | $0, no card | `export CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=…` | first `gen_still_cf` (tiny Neuron spend) |
+    | Hugging Face | `huggingface.co/join` → Settings → Access Tokens → fine-grained, read-only | $0 | `export HF_TOKEN=hf_...` | `poll_cap` unaffected; first `gen_still_hf` |
+    | SiliconFlow | `cloud.siliconflow.com` → sign up → API keys | $0, ~$1 trial credit | `export SILICONFLOW_API_KEY=...` | first `gen_still_sf` |
+    | Novita | `novita.ai` → sign up → API keys | $0, ~$0.50 trial credit | `export NOVITA_API_KEY=...` | `gen_novita` previz (720P/2s) |
+    | Monid (premium) | `monid.ai` → API key + top-up | pay-per-clip USD | `export MONID_API_KEY=...` (per CLI docs) | `monid balance` |
+    | Higgsfield (premium) | interactive OAuth — ask the user to run `higgsfield auth login` themselves; you cannot run it | credits | — | `higgsfield workspace list` |
+    | Codex stills | user runs `codex login` (ChatGPT subscription) | subscription | — | `codex login status` |
+    Key hygiene (no exceptions): env vars only, session-only — never write a key
+    into repo files, prompts, logs, or the manifest (record the lane, never the
+    secret); never print more than the last 4 characters; rotate/revoke at the
+    provider if one ever lands in a file or transcript you don't control.
 
 ---
 
@@ -226,9 +254,10 @@ default. Cover:
        the only trial full-chain backend). Good as stills upgrades or short-chain experiments.
      - **Premium (paid):** Monid per-clip USD (default paid lane) / Higgsfield
        credits fallback — the roster below, fastest wall-clock, highest fidelity.
-     Record `BACKEND` + provider/model + its `CAP` capability flag (Step 4 —
-     CHAIN vs A-ONLY, read off the live catalog; Step 0.7–0.8 for the free auth);
-     every later step keys off them.
+      Record `BACKEND` + provider/model + its `CAP` capability flag (Step 4 —
+      CHAIN vs A-ONLY, read off the live catalog; Step 0.7–0.9 for free auth +
+      key onboarding); record key status as `KEYS` (prompts.md).
+      Every later step keys off them.
      Capability flags gate the architecture (Step 4): a start-frame-only video
      backend can ONLY do architecture A; text-to-video-only backends are declined
      for chain duty entirely.
