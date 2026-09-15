@@ -297,8 +297,10 @@ fast on mismatch so a start-only backend can never be asked for connectors.
 BACKEND=pollinations   # pollinations | local | cloudflare | huggingface | siliconflow | novita
 POLL_MODEL=alibaba/wan-2.2-fast   # a model whose live video_capabilities fit CAP (no paid_only flag)
 CAP=A-ONLY             # CHAIN or A-ONLY (re-check /image/models every build)
-DIVE_DUR=8; CONN_DUR=5 # nova-reel-class: use multiples of 6 (6/12); wan/seedance: 4-15
+DIVE_DUR=8; CONN_DUR=5 # defaults — ALWAYS snap to the live grid before batching:
 ASPECT=16:9            # 9:16 for the §6b mobile chain
+# DIVE_DUR=$(snap_dur "$POLL_MODEL" 8); CONN_DUR=$(snap_dur "$POLL_MODEL" 5)
+# (nova-reel-class takes 6s multiples — blind durations 400. §8e helpers.)
 [ -n "$POLLINATIONS_KEY" ] || echo "WARN: no POLLINATIONS_KEY — free tier throttles/fails"
 
 # Guard: capability gates architecture (SKILL Step 4 rule).
@@ -560,19 +562,47 @@ CHAIN_CASCADE="novita pollflf localflf"     # full A+B (needs end-frame)
 LEG_CASCADE="pollaonly novita-first sflocal" # arch-A legs (start-frame only)
 
 # live probe: is this Pollinations model free AND capable? (need = image|start_frame|end_frame)
+# Prints ok:free | no:<reason> (paid_only, missing-cap, unknown-model, catalog-error).
+# EXACT name match first — aliases can collide with :paid twins (verified 2026-09-15:
+# community/MarcosFRG/flux-1-schnell vs its :paid twin). Verdicts append to retry.log.
+_poll_catalog() { # refresh $WORK/poll_models.json if older than 1h
+  if [ -f "$WORK/poll_models.json" ]; then
+    age=$(( $(date +%s) - $(stat -f%m "$WORK/poll_models.json" 2>/dev/null || stat -c%Y "$WORK/poll_models.json") ))
+    [ "$age" -lt 3600 ] && return 0
+  fi
+  curl -fsSL --max-time 20 https://gen.pollinations.ai/image/models -o "$WORK/poll_models.json" 2>/dev/null
+}
 poll_cap() { # model need
-  curl -fsSL --max-time 20 https://gen.pollinations.ai/image/models 2>/dev/null | python3 -c "
-import json,sys
-want=sys.argv[1]; need=sys.argv[2]; ok=False
+  _poll_catalog || { echo "no:catalog-error" | tee -a "$WORK/retry.log"; return 1; }
+  WORK_DIR="$WORK" POLL_CAP_MODEL="$1" POLL_CAP_NEED="$2" python3 -c "
+import json,os
+want=os.environ['POLL_CAP_MODEL']; need=os.environ['POLL_CAP_NEED']; verdict='no:unknown-model'
 try:
-    for m in json.load(sys.stdin):
-        if m.get('name')==want or want in (m.get('aliases') or []):
-            if m.get('paid_only'): break
-            if need=='image' and m.get('category')=='image': ok=True
-            if need in (m.get('video_capabilities') or []): ok=True
-            break
+    ms=json.load(open(os.environ['WORK_DIR']+'/poll_models.json'))
+    cand=[m for m in ms if m.get('name')==want] or [m for m in ms if want in (m.get('aliases') or [])]
+    if cand:
+        m=cand[0]
+        if m.get('paid_only'): verdict='no:paid_only'
+        elif need=='image' and m.get('category')=='image': verdict='ok:free'
+        elif need in (m.get('video_capabilities') or []): verdict='ok:free'
+        else: verdict='no:missing-cap'
+except Exception: verdict='no:catalog-error'
+print(verdict)" | tee -a "$WORK/retry.log"
+}
+# snap_dur <model> <wantSec> — clamp+round to the model's live duration grid
+# (nova-reel-class takes 6s multiples; blind durations 400 — verified gap 2026-09-15)
+snap_dur() { # model wantSec -> prints grid-snapped seconds
+  _poll_catalog || { echo "$2"; return 0; }
+  WORK_DIR="$WORK" POLL_SNAP_MODEL="$1" POLL_SNAP_WANT="$2" python3 -c "
+import json,os
+want=int(os.environ['POLL_SNAP_WANT']); out=want
+try:
+    for m in json.load(open(os.environ['WORK_DIR']+'/poll_models.json')):
+        if m.get('name')==os.environ['POLL_SNAP_MODEL'] or os.environ['POLL_SNAP_MODEL'] in (m.get('aliases') or []):
+            lo=m.get('min_duration') or 1; hi=m.get('max_duration') or want; step=m.get('duration_step') or 1
+            out=max(lo,min(hi,want)); out=lo+round((out-lo)/step)*step; out=max(lo,min(hi,out)); break
 except Exception: pass
-print('ok' if ok else 'no')" "$1" "$2" 2>/dev/null
+print(out)"
 }
 need_key() { [ -n "$1" ]; }   # need_key "$POLLINATIONS_KEY" || continue
 verify_still() { [ -s "$1" ] && ffprobe -v error -show_entries stream=width -of csv=p=0 "$1" >/dev/null 2>&1; }
@@ -583,7 +613,7 @@ detect_backends() {
   echo "== backend autodetect =="
   need_key "$POLLINATIONS_KEY" \
     && echo "pollinations: KEY (stills + video per live flags)" \
-    || echo "pollinations: no key (keyless hfspace stills only)"
+    || echo "pollinations: no key (keyless image may still work; VIDEO always needs a key — run probe_video)"
   python3 -c "import gradio_client" 2>/dev/null && echo "hfspace: READY (keyless schnell)" || echo "hfspace: pip install gradio_client"
   need_key "$CLOUDFLARE_API_TOKEN" && echo "cloudflare: READY" || echo "cloudflare: no token"
   need_key "$HF_TOKEN" && echo "huggingface: READY" || echo "huggingface: no token"
@@ -592,7 +622,25 @@ detect_backends() {
   python3 -c "import diffusers, torch; assert torch.cuda.is_available()" 2>/dev/null \
     && echo "local: GPU READY" || echo "local: no GPU (lane unavailable)"
   comfy_live && echo "comfyui: LIVE ($COMFY)" || echo "comfyui: down"
-  [ "$(poll_cap flux image)" = "ok" ] && echo "poll/flux: FREE+LIVE" || echo "poll/flux: DOWN/PAID (mirrors next)"
+  case "$(poll_cap flux image)" in ok*) echo "poll/flux: FREE+LIVE";; *) echo "poll/flux: DOWN/PAID (mirrors next)";; esac
+}
+
+# probe_video — MANDATORY 30-second Step 0 check, before any real work or frame
+# uploads. Proves whether a video lane is actually callable (key-presence alone
+# proves nothing — keyless video 401s). Burns one tiny upload, zero Pollen on 401.
+probe_video() {
+  ffmpeg -v error -y -f lavfi -i color=c=black:s=320x180:d=0.5 -frames:v 1 "$WORK/probe.jpg" || return 1
+  tiny=$(curl -fsSL --max-time 60 -F "files[]=@$WORK/probe.jpg" https://uguu.se/upload.php | jq -r '.files[0].url // empty')
+  [ -n "$tiny" ] || { echo "probe: frame host down — video lanes untestable"; return 1; }
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 --get "https://gen.pollinations.ai/video/probe" \
+    --data-urlencode "model=${POLL_MODEL:-amazon/nova-reel-v1}" --data-urlencode "duration=6" \
+    --data-urlencode "aspectRatio=16:9" --data-urlencode "image=$tiny" --data-urlencode "audio=false" \
+    ${POLLINATIONS_KEY:+-H "Authorization: Bearer $POLLINATIONS_KEY"})
+  case "$code" in
+    200) echo "probe: video lane LIVE ($POLL_MODEL)" ;;
+    401|403) echo "probe: video needs a key (HTTP $code) — chain unavailable keyless; stills+page or §8f previz only" ;;
+    *) echo "probe: unclear (HTTP $code) — run the Step 4 qualification before batching" ;;
+  esac
 }
 
 # run_still <name> <seed> — first verified PNG wins; finished clips are skipped (resume-safe)
@@ -601,11 +649,11 @@ run_still() {
   for b in $STILLS_CASCADE; do
     case $b in
       pollflux)   need_key "$POLLINATIONS_KEY" || continue
-                  [ "$(poll_cap "${POLL_IMAGE_MODEL:-flux}" image)" = "ok" ] || continue
+                  case "$(poll_cap "${POLL_IMAGE_MODEL:-flux}" image)" in ok*) ;; *) continue;; esac
                   retry3 2 gen_still_poll "$1" "$2" || continue ;;
       pollmirror) need_key "$POLLINATIONS_KEY" || continue
                   for m in community/MarcosFRG/flux-1-schnell community/CloudCompile/flux-2-klein-4b community/CloudCompile/sdxl-lightning; do
-                    [ "$(poll_cap "$m" image)" = "ok" ] || continue
+                    case "$(poll_cap "$m" image)" in ok*) ;; *) continue;; esac
                     POLL_IMAGE_MODEL="$m" retry3 2 gen_still_poll "$1" "$2" && break
                   done ;;
       hfspace)    retry3 2 gen_still_hfspace "$1" "$2" || continue ;;
@@ -631,7 +679,7 @@ run_chain_clip() {
       novita) need_key "$NOVITA_API_KEY" || continue
               retry3 2 gen_novita "$1" "$2" "$3" "$4" "$5" 1080P || continue ;;
       pollflf) need_key "$POLLINATIONS_KEY" || continue
-              [ "$CAP" = "CHAIN" ] && [ "$(poll_cap "$POLL_MODEL" end_frame)" = "ok" ] || continue
+              case "$(poll_cap "$POLL_MODEL" end_frame)" in ok*) [ "$CAP" = "CHAIN" ] || continue;; *) continue;; esac
               retry3 2 gen_conn_poll_chain "$1" "$2" "$3" "$4" "$5" || continue ;;
       localflf) comfy_live || continue
               retry3 1 gen_flf_local "$1" "$2" "$3" "$4" || continue ;;
@@ -648,7 +696,7 @@ run_leg() {
   for b in $LEG_CASCADE; do
     case $b in
       pollaonly) need_key "$POLLINATIONS_KEY" || continue
-              [ "$(poll_cap "$POLL_MODEL" start_frame)" = "ok" ] || continue
+              case "$(poll_cap "$POLL_MODEL" start_frame)" in ok*) ;; *) continue;; esac
               retry3 2 gen_leg_poll "$1" "$2" "$3" "$4" || continue ;;
       novita-first) need_key "$NOVITA_API_KEY" || continue
               retry3 2 gen_novita "$1" "$2" "" "$3" "$4" 1080P || continue ;;
@@ -692,6 +740,28 @@ or a new build day. Cross-CAP downgrade (CHAIN→A-ONLY mid-build) is the one fa
 that is NOT automatic — it changes the film's grammar, so confirm with the user first
 (SKILL Step 4 rule); everything within a CAP fails over silently and is reported via
 the manifest.
+
+### 8f. Synthetic previz lane — $0, zero-dep, sanctioned (NOT final art)
+
+When no video lane is live (or before spending anything anywhere), validate the whole
+page — journey, pacing, seams, QA — with synthetic push-in stand-ins rendered from the
+real stills. This is an explicit previz step, not a hack: same durations, same §5
+scrub encodes, same engine wiring (`connectors: []`, arch A). The journey it validates
+translates directly to the final render. Verified 2026-09-15: 8.0 s, 1920×1080,
+~5 MB, gentle push-in (frame-diff 0.06). NEVER ship these as the final film without
+telling the user they are synthetic — filename them `standin_*`, record them as such
+in the manifest, and replace with the real chain when a lane goes live.
+
+```bash
+# standin <name> — slow push-in over the scene still, then the §5 scrub encode.
+standin() { # name (uses $DIVE_DUR snapped to whole seconds)
+  ffmpeg -v error -y -loop 1 -i "$WORK/still_$1.png" -vf \
+    "scale=3072:-2,zoompan=z='1+0.06*on/($DIVE_DUR*24)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=$((DIVE_DUR*24)):s=1920x1080:fps=24" \
+    -t "$DIVE_DUR" -c:v libx264 -pix_fmt yuv420p "$WORK/standin_$1.raw.mp4"
+  enc "$WORK/standin_$1.raw.mp4" "$ASSETS/vid/$1.mp4"   # §5 encoder: -g 8, crf 20, faststart
+}
+for n in $NAMES; do standin "$n"; done
+```
 
 ## Notes
 

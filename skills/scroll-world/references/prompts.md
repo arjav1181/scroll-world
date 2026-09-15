@@ -69,6 +69,9 @@ characters doing the work, the props that signal this stage of the business].
 
 Tips:
 - Name concrete props (they anchor the scene): tanks, cauldrons, conveyor, crates, awning, string lights, benches, scooters, map pins.
+- **4-step schnell needs a stronger no-text clause** (verified 2026-09-15: 2/5 stills
+  grew glyph-like artifacts): append "blank unmarked walls, no signage, no plates,
+  no labels, no paper with writing" to the still prompt on free lanes.
 - For the final "hero product" section, drop the diorama-island framing and prompt a
   single oversized product centerpiece floating on the same background with a few small
   orbiting props.

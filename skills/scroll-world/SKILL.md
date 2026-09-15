@@ -75,7 +75,11 @@ not the framework.
    they support start/end-image conditioning at all — before batching, confirm the chosen
    model's schema with `higgsfield model get <job_type>` and see the Step 4 model table.
 7. **Free hosted backends — $0 cash, keys allowed.** These are first-class, not demos.
-    Check which are present and record their balances/allowances (pipeline.md §8):
+    Check which are present and record their balances/allowances (pipeline.md §8),
+    then run `probe_video` (pipeline.md §8e) — a 30-second call that proves whether
+    any video lane is actually callable. Key-presence checks alone prove nothing
+    (keyless video 401s); the probe result decides whether the interview may offer
+    a chain at all:
     - **Pollinations** (`gen.pollinations.ai`): free key at `enter.pollinations.ai`
       (`export POLLINATIONS_KEY=sk_...`). Image: `flux` (= FLUX.1-schnell, 1536×1024,
       `seed` supported). Keyless backup: the official HF Space
@@ -205,8 +209,11 @@ default. Cover:
      `BACKEND`. State the one-line trade-off each:
      - **Free hosted ($0 cash — recommend as default):** Pollinations image
        (`flux`, 1536×1024, seedable; keyless backup: official HF schnell Space) +
-       Pollinations video keyed off the live catalog. Free-tier video is usually
-       **start-frame-only** (`nova-reel`-class),
+       Pollinations video keyed off the live catalog. Honest boundary, verified
+       2026-09-15: keyless video is a hard **401 — a key is mandatory for any video
+       chain**. With zero keys anywhere, the achievable build is *stills + page*
+       (plus the §8f synthetic previz), not a chain — say so before spending quota.
+       Free-tier video is usually **start-frame-only** (`nova-reel`-class),
        which pairs with architecture A — full chain, no connectors needed. Costs
        Pollen/rate-limits, not money; state the allowance, not a price.
      - **Local open ($0 forever, needs GPU):** `diffusers` stills (FLUX.1-schnell /
@@ -776,7 +783,9 @@ is the thing most likely to be wrong:
   shimmer alone (observed on a verified-good build); a real mismatch shows as different
   composition/props, not just softness.
 - Check the console for errors, confirm `video.seekable.end(0) > 0` (blob working), and
-  that `currentTime` tracks scroll across each clip's band.
+  that `currentTime` tracks scroll across each clip's band. The engine lazy-mounts
+  clips (only near the viewport), so scroll each section into range and wait for its
+  `video` element before asserting — asserting all clips up front false-fails.
 - **Mobile — full checklist only if the user opted into the mobile version (Step 1.6).**
   For a desktop-only build, just sanity-check a phone viewport once: page loads, still
   posters show, nothing overlaps — the engine's hardening covers graceful degradation.
