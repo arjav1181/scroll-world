@@ -46,10 +46,19 @@ cp -R scroll-world/skills/scroll-world ~/.codex/skills/    # Codex
 
 ## Requirements
 
-- The [Monid CLI](https://monid.ai) with an API key and balance — the **default
-  video-chain backend** (Seedance 2.0, billed per clip in USD; see below).
+Pick a lane — the skill interviews you for the stack before anything renders:
+
+- **Free hosted ($0 cash, default):** a [Pollinations](https://enter.pollinations.ai)
+  key (`POLLINATIONS_KEY`) — stills (`flux`, 1536×1024) + video off the live catalog
+  (free-tier video is usually start-frame-only, which pairs with the connector-free
+  architecture A). Costs Pollen/rate-limits, not money.
+- **Local open ($0 forever, optional, needs GPU):** Python 3 + `diffusers`/`transformers`
+  (FLUX.1-schnell / SDXL stills) and ComfyUI + Wan-FLF2V (full start+end-frame chain).
+- **Cheap trials (keys, no card):** Cloudflare Workers AI, Hugging Face, SiliconFlow/Novita.
+- **Premium (paid):** the [Monid CLI](https://monid.ai) with an API key and balance — the
+  default video-chain backend for paid builds (Seedance 2.0, billed per clip in USD; see below).
 - The [Higgsfield CLI](https://higgsfield.ai), authenticated (`higgsfield auth login`),
-  with credits — renders the scene stills, the `kling3_0` fallback, and the whole
+  with credits — premium fallback: renders the scene stills, the `kling3_0` fallback, and the whole
   chain when Monid is absent.
 - `ffmpeg` / `ffprobe` for frame extraction and encoding.
 - Python 3 with Pillow (for the mobile portrait canvases; also the optional
@@ -66,14 +75,16 @@ cp -R scroll-world/skills/scroll-world ~/.codex/skills/    # Codex
 
 ## What it does
 
-It generates the art with AI: cohesive isometric diorama scenes (GPT Image 2 — via
+It generates the art with AI: cohesive isometric diorama scenes (free: Pollinations
+`flux` / local FLUX.1-schnell / SDXL; premium: GPT Image 2 via
 Higgsfield, or the Codex CLI on a ChatGPT subscription) and the camera flights
-themselves (Seedance image-to-video via **Monid by default**, pay-per-clip; Seedance
+themselves (free: Pollinations video or local ComfyUI Wan-FLF2V; premium: Seedance
+image-to-video via **Monid by default**, pay-per-clip; Seedance
 or Kling on Higgsfield credits as fallback — only models that can frame-lock a
 seam), scrubbed
 by scroll position — the same technique behind Apple's scroll-through product pages. The
 camera genuinely moves; scroll only drives time. It's **framework-agnostic**: you get the
-Higgsfield pipeline, the prompt templates, and a portable vanilla-JS scrub engine that
+generation pipeline, the prompt templates, and a portable vanilla-JS scrub engine that
 drops into plain HTML, Next.js, Vue, or a Python-served page — nothing assumes a stack.
 
 When invoked, the skill:
@@ -107,12 +118,15 @@ skills/scroll-world/
 
 ## Notes
 
-- Asset generation costs money (~N image gens on Higgsfield credits + ~2N-1 video
+- Asset generation on the premium lane costs money (~N image gens on Higgsfield credits + ~2N-1 video
   gens billed per clip on Monid by default; the mobile chain doubles the video gens)
   and takes a while — the skill runs generations in the background and polls. Monid
   pricing is per-token and printed per run; Higgsfield pricing isn't exposed by its
   CLI, so the skill calibrates against your live balance. Either way the estimated
-  total is stated before spending.
+  total is stated before spending. The free lanes (Pollinations key, Cloudflare/HF/
+  trial keys, local GPU) cost $0 cash — metered in Pollen/rate-limits/VRAM instead —
+  and free-tier video is usually start-frame-only, so those builds fly architecture A
+  (continuous walkthrough, no connectors) unless a free end-frame model is live.
 - The generated `.mp4`/`.webp` assets are produced per project; they're not shipped here.
 
 ## Star History

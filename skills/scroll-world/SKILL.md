@@ -2,15 +2,15 @@
 name: scroll-world
 description: >
   Build an immersive scroll-scrubbed "fly through the world" landing page for any
-  industry or brand using Higgsfield. As the visitor scrolls, a pre-rendered camera
+  industry or brand. As the visitor scrolls, a pre-rendered camera
   flies from outside each scene into its interior, then flows on to the next scene
   with NO cuts — one continuous connected flight (Emons-style isometric diorama world,
   or any art direction you pick). The skill interviews the user for the topic, the
-  story beats/sections, and brand kit, then generates cohesive scenes + seamless camera
-  clips with Higgsfield and wires a portable, framework-agnostic scroll-scrub engine.
-  The video chain renders through Monid by default (Seedance 2.0, pay-per-clip
-  USD — capability re-checked each build, see Step 4) with Higgsfield credits as
-  the fallback biller. Use when the user wants a "3D world" /
+  story beats/sections, brand kit, and which backend stack to render on — free hosted
+  (Pollinations), local open models (diffusers/ComfyUI), tablespoon-cheap API keys,
+  or the premium Monid/Higgsfield path — then generates cohesive scenes + seamless camera
+  clips and wires a portable, framework-agnostic scroll-scrub engine.
+  Use when the user wants a "3D world" /
   "browse-through-the-industry" hero, a scroll cinematic, a diorama landing, or to
   turn a business into a scrollable world.
 allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, Skill
@@ -20,8 +20,10 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, Skill
 
 Produces a landing page where **scroll drives a camera**: it dives from outside a scene
 into its interior, then flies out and into the next scene, continuously, with no visible
-cuts. The visuals are AI-generated — stills via Higgsfield (or Codex), the video chain
-via **Monid by default** (pay-per-clip Seedance 2.0; Higgsfield credits as fallback) —
+cuts. The visuals are AI-generated — stills and the video chain render on whichever
+stack the user picks at the interview (Step 1.7): **free hosted** (Pollinations key,
+$0 cash), **local open models** (diffusers/ComfyUI, $0 forever, needs GPU),
+tablespoon-cheap trial keys, or the **premium** Monid/Higgsfield path —
 and the page just scrubs pre-rendered video by scroll position. This is the same technique behind Apple's scroll-through product
 pages — the camera genuinely moves, scroll only drives time.
 
@@ -44,7 +46,7 @@ not the framework.
 
 ## Step 0 — Bootstrap
 
-1. **Monid CLI — the default video-chain backend.** Check `monid --version`,
+1. **Monid CLI — the default PREMIUM video-chain backend.** Check `monid --version`,
    `monid keys list` (active key) and `monid balance` — the chain is billed per
    clip in USD (Step 1.7 has the numbers; a 1080p N=6 chain ≈ $27). If the CLI is
    missing or the balance can't cover the chain, say so and fall back to
@@ -72,6 +74,52 @@ not the framework.
    Video models differ in accepted params (e.g. Kling has no `--resolution`) and in whether
    they support start/end-image conditioning at all — before batching, confirm the chosen
    model's schema with `higgsfield model get <job_type>` and see the Step 4 model table.
+7. **Free hosted backends — $0 cash, keys allowed.** These are first-class, not demos.
+    Check which are present and record their balances/allowances (pipeline.md §8):
+    - **Pollinations** (`gen.pollinations.ai`): free key at `enter.pollinations.ai`
+      (`export POLLINATIONS_KEY=sk_...`). Image: `flux` (= FLUX.1-schnell, 1536×1024,
+      `seed` supported). Keyless backup: the official HF Space
+      (`gradio_client`, `Client('black-forest-labs/FLUX.1-schnell')`,
+      `/infer`, 1536×1024 — verified working 2026-09-15, ZeroGPU quotas ~2 min/day
+      unauth). Video: start-frame via `image=<url>`, end-frame by appending
+      `|<url>` — but ONLY on models whose live `video_capabilities` list `end_frame`.
+      Verified 2026-09-15: official `seedance-2.0`/`wan`/`veo` are `paid_only` (need
+      purchased Pollen); `nova-reel-v1` (start-frame only, 6s multiples) and the free
+      image models carry no `paid_only` flag; free community schnell mirrors
+      (`community/MarcosFRG/flux-1-schnell`, `community/CloudCompile/flux-2-klein-4b`,
+      `sdxl-lightning`) and rotating community video models fill gaps.
+      **Re-check `/image/models` every build** (`poll_models` in pipeline.md §8d) — the
+      catalog and paid flags move. Free-tier video is start-frame-heavy, which pairs
+      with architecture A (legs chained from actual last frames need no end-frame).
+      Frames travel as public URLs via uguu.se (`poll_frame_url`, ~3h expiry —
+      upload inside the build; 0x0.st/catbox/tmpfiles all failed verification).
+    - **Cloudflare Workers AI** (stills only): account + API token, no card,
+      ~10,000 Neurons/day free. Models `@cf/black-forest-labs/flux-1-schnell`,
+      `@cf/bytedance/stable-diffusion-xl-lightning`. Square-ish output — resize/crop
+      to 3:2 after.
+    - **Hugging Face Inference** (stills only over hosted API — its video task list is
+      text-to-video only, no image conditioning, so it can't hold a seam): free token
+      (`export HF_TOKEN=hf_...`), ~$0.10/mo free credits. `FLUX.1-schnell`/SDXL via
+      `InferenceClient().text_to_image()`.
+    - **SiliconFlow / Novita** (trials, no card to start): ~$1 / ~$0.50 one-time
+      signup credit. Stills: FLUX.1-schnell with freeform `image_size: 1536x1024`.
+      Video: Novita `wan2.7-i2v` takes `image_url` + `last_frame_url` (async
+      submit → poll `task-result`) — a genuine trial CHAIN backend; SiliconFlow's
+      I2V is start-frame only → architecture A. Trial credit covers qualification
+      + short chains, not full N=6 1080p builds — meter it via `$WORK/MANIFEST.txt`.
+    Every free-lane generator runs under `retry3` + `verify_clip` (pipeline.md §8d):
+    queues and quotas make transient failures the norm, not the exception.
+    Absence of a key just removes that lane; local (next) and premium (above) remain.
+8. **Local open backends — $0 forever, GPU required, no keys.** Offer, never assume:
+    - **Stills:** `pip install diffusers[torch] transformers accelerate` →
+      `FLUX.1-schnell` (Apache-2.0, commercial-safe) or SDXL-Turbo/SDXL. Apple Silicon:
+      `mflux`. No signup, no watermark. (Avoid FLUX.1-dev weights for anything
+      commercial — non-commercial license.)
+    - **Video chain:** ComfyUI + **Wan2.1/2.2-FLF2V** (first+last-frame → full A+B,
+      Apache-2.0; 14B fp8 ≈ 15 GB VRAM, 480×854 fallback for small GPUs) or
+      LTX-Video keyframes. SVD/AnimateDiff are start-frame-only → architecture A only.
+    If no GPU is present, say so and steer to the free hosted lane — don't attempt
+    local video on CPU.
 
 ---
 
@@ -152,7 +200,34 @@ default. Cover:
    render tiers (`AskUserQuestion`), then compute and state the estimated total for
    the user's N scenes — `N stills + (2N−1) videos [videos ×2 if mobile] + ~15%
    re-roll headroom` — and get a go before generating.
-   - **Video tier** (roster only — every option frame-locks seams, Step 4):
+   - **Stack — ALWAYS ask which lane; local is one option, never the assumption**
+     (`AskUserQuestion` in Claude Code; a plain question elsewhere). Record as
+     `BACKEND`. State the one-line trade-off each:
+     - **Free hosted ($0 cash — recommend as default):** Pollinations image
+       (`flux`, 1536×1024, seedable; keyless backup: official HF schnell Space) +
+       Pollinations video keyed off the live catalog. Free-tier video is usually
+       **start-frame-only** (`nova-reel`-class),
+       which pairs with architecture A — full chain, no connectors needed. Costs
+       Pollen/rate-limits, not money; state the allowance, not a price.
+     - **Local open ($0 forever, needs GPU):** `diffusers` stills (FLUX.1-schnell /
+       SDXL, unlimited) + ComfyUI **Wan-FLF2V** chain (full A+B, frame-locks both
+       ends). Check VRAM first (14B fp8 ≈ 15 GB; 480×854 fallback below that); no
+       GPU → steer back to free hosted, never attempt local video on CPU.
+     - **Cheap trials (keys, no card):** Cloudflare (stills, ~10k Neurons/day),
+       Hugging Face (stills top-up), SiliconFlow (one-time credit; video is
+       start-only → arch A), Novita wan2.7-i2v (start+END frames on trial credit —
+       the only trial full-chain backend). Good as stills upgrades or short-chain experiments.
+     - **Premium (paid):** Monid per-clip USD (default paid lane) / Higgsfield
+       credits fallback — the roster below, fastest wall-clock, highest fidelity.
+     Record `BACKEND` + provider/model + its `CAP` capability flag (Step 4 —
+     CHAIN vs A-ONLY, read off the live catalog; Step 0.7–0.8 for the free auth);
+     every later step keys off them.
+     Capability flags gate the architecture (Step 4): a start-frame-only video
+     backend can ONLY do architecture A; text-to-video-only backends are declined
+     for chain duty entirely.
+    - **Video tier** (premium lane only — skip when `BACKEND` is free/local/trials;
+      those lanes pick from the Step 4 capability flags instead. Roster only —
+      every option frame-locks seams, Step 4):
 
      | Tier | Model | Rough cost |
      |---|---|---|
@@ -236,13 +311,32 @@ Subject: <what is in THIS diorama>.
     < /dev/null
   ```
 
-  Single-quote the `$imagegen` segment (the shell must not expand it); if editing
-  with reference images, the prompt goes BEFORE any `-i` flag (it's variadic).
-  ~1–3 min per image; run a few in parallel, not all N at once — and keep the
-  `< /dev/null`: parallel `codex exec` calls sharing a script's stdin hang
-  waiting for input (Gotchas). Output lands at
-  1536×1024 (3:2) — fine for `--start-image` and posters. Everything downstream
-  (cohesion review, knockout, dives) is unchanged.
+   Single-quote the `$imagegen` segment (the shell must not expand it); if editing
+   with reference images, the prompt goes BEFORE any `-i` flag (it's variadic).
+   ~1–3 min per image; run a few in parallel, not all N at once — and keep the
+   `< /dev/null`: parallel `codex exec` calls sharing a script's stdin hang
+   waiting for input (Gotchas). Output lands at
+   1536×1024 (3:2) — fine for `--start-image` and posters. Everything downstream
+   (cohesion review, knockout, dives) is unchanged.
+- **Free stills variants** (if `BACKEND` = free-hosted / local / trials — $0 cash,
+  same prompt files, same byte-identical preamble; full commands in pipeline.md §8):
+  - *Pollinations (free hosted default):* `GET /image/{prompt}?model=flux&width=1536
+    &height=1024&seed=<n>&key=$POLLINATIONS_KEY` → curl down the bytes. No
+    `paid_only` flag on `flux` (verified 2026-09-15) — but re-check the catalog;
+    if it ever flips to paid, fall to a free community schnell mirror or Cloudflare.
+  - *Cloudflare (trials lane):* `POST .../ai/run/@cf/black-forest-labs/flux-1-schnell`
+    with `{"prompt": ..., "steps": 4}` → base64 `image`; resize/crop to 3:2 after
+    (output runs square-ish).
+  - *Hugging Face (trials lane):* `InferenceClient(token).text_to_image(...,
+    model="black-forest-labs/FLUX.1-schnell")` — mind the ~$0.10/mo free credit.
+  - *SiliconFlow (trials lane):* `POST /v1/images/generations`,
+    `{"model":"black-forest-labs/FLUX.1-schnell","image_size":"1536x1024"}` —
+    result URLs expire in ~1h, download immediately.
+  - *Local (optional lane):* `diffusers` `FluxPipeline` (`FLUX.1-schnell`) or SDXL
+    at 1536×1024, fixed seed per scene. Unlimited, no key, commercial-safe with
+    `-schnell`/SDXL weights (never `-dev` for commercial work).
+  - **One stills source for all N stills of a build**, paid or free — mixing
+    renderers across scenes reads as style drift, same as the video chain rule.
 - A generation may fail transiently (HTTP 503) — re-roll that one individually; don't
   restart the batch.
 - **Review the stills before continuing.** They must read as one cohesive world (same
@@ -303,8 +397,59 @@ PSNR 33 dB) and a forward-glide prompt was obeyed, gently. Constraints: the 2.3 
 rejects `end_image` (no connectors → arch A only), output aspect follows the input image
 (hand it a 16:9 canvas, not a bare 3:2 still), motion runs subtler than seedance, and
 don't pass `--resolution` (the CLI mis-types the enum; the 768 default works — 1080
-supports 6s only). One clip ≠ a chain: qualify a leg-to-leg handoff before betting a
-full build on it.
+ supports 6s only). One clip ≠ a chain: qualify a leg-to-leg handoff before betting a
+ full build on it.
+
+ ### Free video backends — capability flags decide the architecture
+
+ Every video backend gets one flag (`CAP`), checked live before batching. The flag — not
+ preference — picks which architectures it may render:
+
+ - **CHAIN (start-frame + end-frame):** may render A and B. Premium: Monid
+   seedance-2.0, Higgsfield roster above. Free: local ComfyUI **Wan2.1/2.2-FLF2V**
+   (`WanFirstLastFrameToVideo`, Apache-2.0) — the only $0-forever full-chain path;
+   Pollinations models carrying `end_frame` in live `video_capabilities`
+   **without** a `paid_only` flag (free community FLF models rotate — verify, then
+   qualify with the probe protocol below; never assume yesterday's free model).
+ - **A-ONLY (start-frame, no end-frame):** architecture A legs only (legs chain from
+   actual last frames, so no end-frame is ever needed), never B connectors.
+   Free hosted: Pollinations `nova-reel`-class (`start_frame` only, 6s multiples —
+   set leg durations to the grid). Trials: SiliconFlow I2V (start-only). Local:
+   SVD/AnimateDiff/LTX-I2V. Wiring: legs sequential per arch A, `connectors: []`.
+ - **TRIAL-CHAIN (start+end on metered credit):** Novita `wan2.7-i2v`
+   (`image_url` + `last_frame_url`, async) — full A+B while the ~$0.50 signup
+   credit lasts. Treat like a paid lane with a tiny balance: qualify, previz
+   cheap (720P/2s), meter every clip in the manifest.
+ - **DISQUALIFIED (no image conditioning):** text-to-video-only backends (Hugging Face
+   hosted video, community T2V models). Declined for chain duty with a one-line why —
+   same rule as reference-only models.
+
+ Verified 2026-09-15 on the live Pollinations catalog: image `flux` has no
+ `paid_only` flag; official `seedance-2.0`/`wan`/`veo` are `paid_only: true`
+ (purchased Pollen — a cash upgrade inside the free lane, not the free path);
+ `nova-reel-v1` is start-frame-only at 0.08 pollen/s in 6s steps. The catalog moves —
+ `GET /image/models` (or `/video/models`) every build, and re-run the qualification
+ probes below whenever the flags differ from what pipeline.md documents.
+
+ **Qualification protocol for any free/changed endpoint** (each probe = one cheap
+ clip at the lowest resolution/duration): (1) prompt + start-frame from a real still —
+ frame 0 must match the input to codec noise (PSNR ≳ 30 dB); (2) for CHAIN duty, add
+ an end-frame from a *different* still — the end must land on that composition
+ (Seedance-style near-miss is fine, the crossfade covers it); A-ONLY skips probe 2
+ and instead qualifies a leg-to-leg handoff (leg 1's last frame → leg 2's start must
+ continue position AND forward velocity). Pass → roster tier for that flag.
+
+ **Fallback doctrine — the free tier manages itself (pipeline.md §8e).** At Step 0,
+ run `detect_backends` and present only live lanes at the interview. Every free-lane
+ generation goes through a cascade (`STILLS_CASCADE`, `CHAIN_CASCADE`, `LEG_CASCADE`):
+ ordered cheapest-reliable-first, first live+verified entry wins, per-clip failover,
+ resume-safe (finished clips are skipped). If one model is removed, flipped to paid,
+ quota-hit, or 503s, the runner probes the next entry and continues — no user action,
+ no restarted batch. Re-probe triggers: a provider failing twice in a row, any
+ `paid_only`/402/BLOCKED/429, or a new build day. Report which lane served each phase
+ (the manifest) when the build completes. The ONE failover that is never silent is a
+ cross-`CAP` downgrade (CHAIN→A-ONLY changes the film's grammar) — confirm with the
+ user first, same as the architecture rule above.
 
 Rules:
 - **One model for all chained clips.** Each renderer has its own motion/color/grain
@@ -317,7 +462,15 @@ Rules:
   a user's stated preference **only if the model qualifies** (frame-locking). If it
   doesn't, say so and use a supported model — never ship a non-seamless build to
   satisfy a model request. `kling3_0` and `seedance_2_0_mini` exist only on the
-  Higgsfield side.
+  Higgsfield side. When `BACKEND` is a free lane, the default is Pollinations
+  (free hosted) or Wan-FLF2V (local) instead — same rule, different roster; the
+  pipeline scripts take the backend as `$BACKEND` with per-provider functions
+  already cased out (`references/pipeline.md` §8).
+- **Capability flag gates architecture, unconditionally.** CHAIN backends may render
+  A or B per the `CAMERA` choice; A-ONLY backends render A even if the user picked
+  fly-through — say so at the interview ("free-tier video can't do aerial
+  connectors, so this build flies the continuous walkthrough") and confirm before
+  rendering. DISQUALIFIED backends never render chain clips.
 - The pipeline scripts take the model as `$VMODEL` with per-model flags already cased
   out (`references/pipeline.md`).
 
@@ -736,6 +889,42 @@ is the thing most likely to be wrong:
   late July 2026, then gained first/last-frame support). `monid inspect` before each
   build; re-run the Step 4 qualification probes when the Input schema differs from
   what pipeline.md documents.
+- **Pollinations "free" model 402s / asks for purchased Pollen** → the catalog
+  rotated it to `paid_only` (observed: official seedance/wan/veo carry the flag).
+  Fall back to a start-frame-only free model + architecture A, a free community
+  mirror, or Cloudflare/local stills + a trial video key — never ask the user for
+  cash mid-run without re-confirming the stack choice.
+- **Pollinations connector silently drifts (end ignored)** → the model dropped
+  `image[1]`: only models with `end_frame` in live `video_capabilities` interpolate.
+  Others accept the param and ignore it. Downgrade that backend to A-ONLY and
+  re-render the chain as legs; don't "fix" it with longer crossfades.
+- **Free video lands on the wrong grid** → `nova-reel`-class takes 6s multiples
+  (6/12/…); odd durations error or round. Keep `DIVE_DUR`/`CONN_DUR` on the model's
+  grid (pipeline.md §8 cases it out).
+- **Pollinations/Cloudflare result gone (URL expired)** → hosted result URLs expire
+  (hours–days). The §8 functions download immediately after each clip — if you
+  adapted them, keep that; re-downloads of yesterday's runs 404.
+- **Frame host 404s the video call** → Pollinations takes public image URLs, not
+  local paths. Frames ride a free file host (§8 `poll_frame_url`); hotlink-proof
+  hosts and expired pastes fail the run, not the upload — test the URL with a bare
+  curl before burning Pollen on it.
+- **Cloudflare still comes back square** → expected: no explicit W/H on most models.
+  Resize/crop to 3:2 in the §8 function (it does), and keep the focal subject
+  centred (prompts.md) so the crop never eats it.
+- **Local video OOMs mid-chain** → VRAM floor missed (Wan 14B fp8 ≈ 15 GB). Drop to
+  the 480×854 fallback workflow / distilled LTX / block-swap before re-trying —
+  don't re-run the same shape hoping it fits. Finished legs survive; resume.
+- **Community free model tastes different per clip** → community mirrors rotate
+  weights. One provider+model for the whole chain still applies — if the mirror
+  changes mid-build, restart the chain on the new one or finish on it only after
+  eyeballing a seam, same as any model swap.
+- **HF Space still 429s / stalls mid-batch** → ZeroGPU daily quota spent (~2 min
+  unauth, ~5 min free account). Add `HF_TOKEN` (raises quota), wait for reset, or
+  switch the batch to Pollinations `flux`/Cloudflare — the prompt files are identical.
+- **uguu.se link dead at video time** → files expire in ~3h. Upload-then-use inside
+  the same phase; never upload all frames up front for a build that renders tomorrow.
+  (0x0.st 503, catbox 412/403, tmpfiles HTML-wrapped, transfer.sh down — all verified
+  2026-09-15; uguu.se is the documented host until re-verified otherwise.)
 - **Codex stills hang at "Reading additional input from stdin..."** → parallel
   `codex exec` calls launched from one script share the parent's stdin; one wins it,
   the rest block forever (observed: 1 of 3 completed, 2 hung, the second batch never

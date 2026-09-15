@@ -28,7 +28,17 @@ Collect and write down:
   Chosen by cost at SKILL Step 1.7, with the estimated total stated before
   anything renders.
 - `STILLS_SOURCE` — higgsfield (`gpt_image_2`, spends credits) | codex
-  (`image_gen`, subscription-billed; only offer when the Codex CLI is present).
+  (`image_gen`, subscription-billed; only offer when the Codex CLI is present) |
+  free: pollinations (`flux`, key, $0 cash) | hfspace (official schnell Gradio
+  Space, KEYLESS, ZeroGPU quota) | cloudflare (`flux-1-schnell`, key) |
+  huggingface (`FLUX.1-schnell`, token) | siliconflow (`FLUX.1-schnell`, trial key) |
+  local (`diffusers` schnell/SDXL, GPU, unlimited).
+- `BACKEND` — the render stack, **always asked** (SKILL Step 1.7): free-hosted
+  (Pollinations, default, $0 cash; HF-Space schnell as the keyless stills backup) |
+  local (diffusers + ComfyUI Wan-FLF2V, needs GPU) | trials (Cloudflare/HF/
+  SiliconFlow keys; Novita wan2.7-i2v as the trial CHAIN backend) | premium (Monid
+  USD / Higgsfield credits). Record with it the `CAP` flag (CHAIN vs A-ONLY vs
+  TRIAL-CHAIN, read off the live catalog) — it gates arch A vs B unconditionally.
 
 ## Style preamble (default: clay diorama)
 

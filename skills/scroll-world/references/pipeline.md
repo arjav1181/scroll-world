@@ -287,6 +287,412 @@ failure to watch for (it's why the harness exists): `minimax /v1/video_generatio
 still silently drops the image when `prompt` is present — image-only output proves
 nothing about steerability.
 
+## 8. Free backends — $0-cash chains (BACKEND shootout)
+
+Set once. `BACKEND` is the Step 1.7 stack answer; `CAP` is its live capability flag
+(SKILL Step 4 — CHAIN = start+end frames, A-ONLY = start frame only). The guard fails
+fast on mismatch so a start-only backend can never be asked for connectors.
+
+```bash
+BACKEND=pollinations   # pollinations | local | cloudflare | huggingface | siliconflow | novita
+POLL_MODEL=alibaba/wan-2.2-fast   # a model whose live video_capabilities fit CAP (no paid_only flag)
+CAP=A-ONLY             # CHAIN or A-ONLY (re-check /image/models every build)
+DIVE_DUR=8; CONN_DUR=5 # nova-reel-class: use multiples of 6 (6/12); wan/seedance: 4-15
+ASPECT=16:9            # 9:16 for the §6b mobile chain
+[ -n "$POLLINATIONS_KEY" ] || echo "WARN: no POLLINATIONS_KEY — free tier throttles/fails"
+
+# Guard: capability gates architecture (SKILL Step 4 rule).
+case "$CAP" in
+  CHAIN)  echo "backend $BACKEND ($POLL_MODEL): arch A or B" ;;
+  A-ONLY) echo "backend $BACKEND ($POLL_MODEL): arch A ONLY — connectors disabled" ;;
+  *)      echo "backend $BACKEND DISQUALIFIED for chain duty"; exit 1 ;;
+esac
+```
+
+Frames ride public URLs on hosted backends (they take URLs, never local paths).
+Free file host for the handoff frames — test the URL before burning Pollen on it:
+
+```bash
+# upload a local frame, print a public HOTLINK url (verified 2026-09-15: uguu.se
+# round-trips byte-identical; expires in ~3h — upload inside the build, use at once).
+poll_frame_url() { # localPng  (JPEG-compresses on the way up)
+  jpg="$WORK/up_$(basename "$1" .png).jpg"
+  ffmpeg -v error -y -i "$1" -vf "scale='min(1536,iw)':-2" -q:v 2 "$jpg"
+  curl -fsSL -F "files[]=@$jpg" https://uguu.se/upload.php | jq -r '.files[0].url // empty'
+}
+```
+
+### 8a. Free stills (Step 2 — one source for all N stills)
+
+```bash
+# Pollinations (free-hosted default): 1536x1024, fixed seed per scene.
+# Model via $POLL_IMAGE_MODEL (default flux; cascade overrides for mirrors).
+gen_still_poll() { # name seed
+  curl -fsSL --max-time 600 --get "https://gen.pollinations.ai/image/$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(open('$WORK/still_$1.txt').read()))")" \
+    --data-urlencode "model=${POLL_IMAGE_MODEL:-flux}" --data-urlencode "width=1536" --data-urlencode "height=1024" \
+    --data-urlencode "seed=$2" --data-urlencode "nologo=true" \
+    -H "Authorization: Bearer $POLLINATIONS_KEY" -o "$WORK/still_$1.png" \
+    && echo "still $1 ok (poll/${POLL_IMAGE_MODEL:-flux})" || echo "still $1 FAIL"
+}
+
+# Cloudflare Workers AI (trials lane): schnell, then force 3:2 (output runs square-ish).
+gen_still_cf() { # name
+  curl -fsSL "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/black-forest-labs/flux-1-schnell" \
+    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg p "$(cat "$WORK/still_$1.txt")" '{prompt:$p,steps:4}')" \
+    | jq -r '.result.image // empty' | base64 -d > "$WORK/still_$1.sq.png"
+  ffmpeg -v error -y -i "$WORK/still_$1.sq.png" -vf "scale=1536:1024:force_original_aspect_ratio=increase,crop=1536:1024" "$WORK/still_$1.png" \
+    && echo "still $1 ok (cf)" || echo "still $1 FAIL"
+}
+
+# Hugging Face Inference (trials lane): schnell via InferenceClient. Mind the free credit.
+gen_still_hf() { # name seed
+  HF_PROMPT="$WORK/still_$1.txt" HF_OUT="$WORK/still_$1.png" HF_SEED="$2" python3 -c "
+import os; from huggingface_hub import InferenceClient
+c = InferenceClient(token=os.environ['HF_TOKEN'])
+img = c.text_to_image(open(os.environ['HF_PROMPT']).read(),
+      model='black-forest-labs/FLUX.1-schnell')
+img.save(os.environ['HF_OUT'])" \
+    && echo "still $1 ok (hf)" || echo "still $1 FAIL"
+}
+
+# SiliconFlow (trials lane): schnell, freeform 1536x1024. URLs expire in ~1h — instant download.
+gen_still_sf() { # name seed
+  url=$(curl -fsSL https://api.siliconflow.com/v1/images/generations \
+    -H "Authorization: Bearer $SILICONFLOW_API_KEY" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg p "$(cat "$WORK/still_$1.txt")" --argjson s "$2" \
+      '{model:"black-forest-labs/FLUX.1-schnell",prompt:$p,image_size:"1536x1024",seed:$s}')" \
+    | jq -r '.images[0].url // empty')
+  [ -n "$url" ] && curl -fsSL "$url" -o "$WORK/still_$1.png" && echo "still $1 ok (sf)" || echo "still $1 FAIL"
+}
+
+# Local diffusers (optional lane): FLUX.1-schnell, unlimited, commercial-safe. Needs GPU.
+gen_still_local() { # name seed
+  STILL_PROMPT="$WORK/still_$1.txt" STILL_OUT="$WORK/still_$1.png" STILL_SEED="$2" python3 -c "
+import os, torch
+from diffusers import FluxPipeline
+p = FluxPipeline.from_pretrained('black-forest-labs/FLUX.1-schnell', torch_dtype=torch.bfloat16)
+p.enable_model_cpu_offload()
+img = p(prompt=open(os.environ['STILL_PROMPT']).read(), width=1536, height=1024,
+        num_inference_steps=4, generator=torch.Generator().manual_seed(int(os.environ['STILL_SEED']))).images[0]
+img.save(os.environ['STILL_OUT'])" \
+    && echo "still $1 ok (local)" || echo "still $1 FAIL"
+}
+
+# HF Spaces Gradio (free-hosted, KEYLESS — verified 2026-09-15: 1536x1024 schnell
+# still, $0, no signup; ZeroGPU quotas: ~2 min/day unauth, ~5 min/day free account —
+# a 4-step schnell still costs seconds, so N=6 fits, barely; add HF_TOKEN to raise it).
+# Needs: pip install gradio_client. Files land in /tmp/gradio/<hash>/ — copy them out.
+gen_still_hfspace() { # name seed
+  STILL_PROMPT="$WORK/still_$1.txt" STILL_OUT="$WORK/still_$1.png" STILL_SEED="$2" python3 -c "
+import os, shutil, glob
+from gradio_client import Client
+c = Client('black-forest-labs/FLUX.1-schnell')
+path, _ = c.predict(prompt=open(os.environ['STILL_PROMPT']).read(),
+        seed=int(os.environ['STILL_SEED']), randomize_seed=False,
+        width=1536, height=1024, num_inference_steps=4, api_name='/infer')
+shutil.copy(path, os.environ['STILL_OUT'])" \
+    && echo "still $1 ok (hfspace)" || echo "still $1 FAIL (quota? retry later / add HF_TOKEN)"
+}
+```
+
+If Pollinations `flux` ever flips to `paid_only`, stay keyless by swapping the model in
+`gen_still_poll` to a free community mirror (live-verified free 2026-09-15:
+`community/MarcosFRG/flux-1-schnell`, `community/CloudCompile/flux-2-klein-4b`,
+`community/CloudCompile/sdxl-lightning`) — same params, then re-run one still and
+eyeball the style before batching.
+
+Run the batch with your lane's function (`seed = index*77` keeps scenes distinct but
+reproducible): `i=0; for n in $NAMES; do gen_still_poll "$n" $((i*77)); i=$((i+1)); done`
+— then webp + cohesion review exactly as §1.
+
+### 8b. Free video chain — Pollinations (CHAIN or A-ONLY per live flags)
+
+Dives take the start-frame URL; connectors append `|<end-url>` (end-frame ignored by
+models without it — that's the downgrade-to-A-ONLY signal, SKILL Gotchas). Duration
+must sit on the model's grid and in `[min_duration,max_duration]` (read them off
+`/image/models`).
+
+```bash
+gen_dive_poll() { # name
+  furl=$(poll_frame_url "$WORK/still_$1.png")
+  curl -fsSL --get "https://gen.pollinations.ai/video/$(python3 -c "import urllib.parse;print(urllib.parse.quote(open('$WORK/dive_$1.txt').read()))")" \
+    --data-urlencode "model=$POLL_MODEL" --data-urlencode "duration=$DIVE_DUR" \
+    --data-urlencode "aspectRatio=$ASPECT" --data-urlencode "image=$furl" --data-urlencode "audio=false" \
+    -H "Authorization: Bearer $POLLINATIONS_KEY" -o "$WORK/dive_$1.mp4" \
+    && echo "dive $1 ok (poll/$POLL_MODEL)" || echo "dive $1 FAIL"
+}
+gen_conn_poll() { # i startPng endPng   (CAP=CHAIN only — the guard above enforces it)
+  [ "$CAP" = "CHAIN" ] || { echo "conn $1 REFUSED ($POLL_MODEL is A-ONLY)"; return 1; }
+  su=$(poll_frame_url "$2"); eu=$(poll_frame_url "$3")
+  curl -fsSL --get "https://gen.pollinations.ai/video/$(python3 -c "import urllib.parse;print(urllib.parse.quote(open('$WORK/conn_$1.txt').read()))")" \
+    --data-urlencode "model=$POLL_MODEL" --data-urlencode "duration=$CONN_DUR" \
+    --data-urlencode "aspectRatio=$ASPECT" --data-urlencode "image=$su|$eu" --data-urlencode "audio=false" \
+    -H "Authorization: Bearer $POLLINATIONS_KEY" -o "$WORK/conn_$1.mp4" \
+    && echo "conn $1 ok (poll/$POLL_MODEL)" || echo "conn $1 FAIL"
+}
+for n in $NAMES; do gen_dive_poll "$n" & done ; wait
+```
+
+A-ONLY lanes (nova-reel-class, SiliconFlow/Novita I2V) render **architecture-A legs**:
+same `gen_dive_poll`, sequentially, each leg's `--start-image` = previous leg's ACTUAL
+last frame (§3 extraction unchanged), no `--end-image` anywhere, `connectors: []`.
+Mobile chain: same functions with `ASPECT=9:16` + the §6b portrait canvases.
+
+### 8b2. Trial CHAIN — Novita Wan-I2V first+last-frame (verified 2026-09: `wan2.7-i2v`
+takes `image_url` + `last_frame_url`; async submit → poll `task-result`)
+
+```bash
+novita_wait() { # taskId outJson
+  while :; do sleep 10
+    NO_COLOR=1 curl -fsSL "https://api.novita.ai/v3/async/task-result?task_id=$1" \
+      -H "Authorization: Bearer $NOVITA_API_KEY" > "$2" 2>/dev/null
+    case "$(jq -r '.status // .task.status // empty' "$2")" in
+      TASK_STATUS_SUCCEED|SUCCESS|COMPLETED) break ;;
+      TASK_STATUS_FAILED|FAILED) break ;;
+    esac
+  done
+}
+gen_novita() { # outMp4 startPng endPngOrEmpty promptTxt dur res (720P|1080P)
+  su=$(poll_frame_url "$2"); [ -n "$3" ] && eu=$(poll_frame_url "$3") || eu=""
+  body=$(jq -n --arg p "$(cat "$5")" --arg s "$su" --arg e "$eu" --arg r "$7" --argjson d "$6" \
+    '{model:"wan2.7-i2v", input:{prompt:$p, image_url:$s} + (if $e != "" then {last_frame_url:$e} else {} end),
+      parameters:{resolution:$r, duration:$d}}')
+  tid=$(curl -fsSL https://api.novita.ai/v3/async/wan2.7-i2v \
+    -H "Authorization: Bearer $NOVITA_API_KEY" -H 'Content-Type: application/json' \
+    -d "$body" | jq -r '.task_id // empty')
+  [ -z "$tid" ] && { echo "clip $1 FAIL (submit)"; return 1; }
+  novita_wait "$tid" "$1.task.json"
+  url=$(jq -r '.videos[0].url // .video_url // .output.video_url // empty' "$1.task.json")
+  [ -n "$url" ] && curl -fsSL "$url" -o "$1" && verify_clip "$1" \
+    && echo "clip $1 ok (novita)" || echo "clip $1 FAIL ($(jq -r '.status' "$1.task.json"))"
+}
+# dives/legs: gen_novita "$WORK/dive_$n.mp4" "still_$n.png" "" "$WORK/dive_$n.txt" 8 1080P
+# connectors (CAP=CHAIN only): gen_novita "$WORK/conn_$i.mp4" "last_$prev.png" "first_$n.png" "$WORK/conn_$i.txt" 5 1080P
+# Trial credit (~$0.50) covers qualification + short chains, not N=6 1080p — meter it.
+```
+
+### 8c. Free video chain — local ComfyUI Wan-FLF2V (CHAIN, $0 forever)
+
+Needs the Wan2.1/2.2-FLF2V workflow in ComfyUI (`WanFirstLastFrameToVideo`,
+diffusion + umt5 + vae + clip_vision_h loaded; 14B fp8 ≈ 15 GB VRAM, 480×854
+fallback below). Drop stills/frames into ComfyUI's `input/` dir, keep one workflow
+template with `START_PNG`/`END_PNG`/`PROMPT_TXT` placeholders, then:
+
+```bash
+COMFY=http://127.0.0.1:8188
+gen_flf_local() { # outMp4 startPng endPngOrEmpty promptTxt
+  jq --arg s "$(basename "$2")" --arg e "$(basename "$3")" --arg p "$(cat "$4")" \
+    '(.nodes[] | select(.id=="START") | .inputs.image) = $s
+     | (.nodes[] | select(.id=="END")   | .inputs.image) = $e
+     | (.nodes[] | select(.id=="PROMPT") | .inputs.text) = $p' \
+    "$WORK/flf_template.json" > "$WORK/flf_job.json"
+  pid=$(curl -fsSL "$COMFY/prompt" -H 'Content-Type: application/json' \
+    -d "{\"prompt\": $(cat "$WORK/flf_job.json")}" | jq -r '.prompt_id')
+  while :; do sleep 10
+    done=$(curl -fsSL "$COMFY/history/$pid" | jq -r ".[\"$pid\"].status.completed // false")
+    [ "$done" = "true" ] && break
+  done
+  vid=$(curl -fsSL "$COMFY/history/$pid" | jq -r ".. | .gifs? // empty | .[0].filename // empty")
+  curl -fsSL "$COMFY/view?filename=$vid&subfolder=video" -o "$1" \
+    && echo "clip $1 ok (local)" || echo "clip $1 FAIL"
+}
+# dives: gen_flf_local "$WORK/dive_$n.mp4" "still_$n.png" "" "$WORK/dive_$n.txt" (parallel ok)
+# legs (arch A): sequential, start = previous leg's actual last frame (§3)
+# connectors (arch B): gen_flf_local "$WORK/conn_$i.mp4" "last_$prev.png" "first_$n.png" "$WORK/conn_$i.txt"
+```
+
+Frame extraction (§3), encoding (§5/§6), mobile (ASPECT/§6b) and QA are identical on
+every backend — only generation differs. Result URLs on hosted lanes expire
+(hours–days): every function above downloads immediately; never batch-generate then
+batch-download.
+
+### 8d. Hardening — retries, verify, manifest (use on every free lane)
+
+Free lanes fail transiently (queues, quotas, file-host hiccups). Wrap every generator:
+
+```bash
+# retry3 <tries> <cmd...> — 3 tries, exponential backoff, logs to $WORK/retry.log
+retry3() { t=$1; shift; i=0
+  while [ $i -lt $t ]; do
+    "$@" && return 0
+    i=$((i+1)); echo "retry $i/$t: $* ($(date +%H:%M))" >> "$WORK/retry.log"; sleep $((15*i))
+  done; return 1
+}
+# verify_clip <mp4> <minSec> — real video? (ffprobe duration + nonzero frames)
+verify_clip() {
+  dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$1" 2>/dev/null || echo 0)
+  python3 -c "import sys; sys.exit(0 if float('${dur:-0}') >= ${2:-4} else 1)"
+}
+# manifest line per finished clip: name backend model bytes seconds (Step 1.7 accounting)
+note() { printf '%s | %s | %s | %sB | %ss\n' "$1" "$BACKEND" "${2:-$POLL_MODEL}" \
+  "$(stat -f%z "$WORK/$1" 2>/dev/null || stat -c%s "$WORK/$1")" \
+  "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK/$1")" >> "$WORK/MANIFEST.txt"; }
+# usage: retry3 3 gen_dive_poll farm && verify_clip "$WORK/dive_farm.mp4" 7 && note "dive_farm.mp4"
+
+# Pre-flight: confirm the free allowance BEFORE batching (Step 1.7 calibration).
+poll_models() { # dump live catalog flags for the chosen model
+  curl -fsSL https://gen.pollinations.ai/image/models | python3 -c "
+import json,sys,os
+want = os.environ.get('POLL_MODEL','')
+for m in json.load(sys.stdin):
+    if m.get('name')==want or want in (m.get('aliases') or []):
+        print('model:', m['name']); print('paid_only:', m.get('paid_only', False))
+        print('video_cap:', m.get('video_capabilities')); print('dur:', m.get('min_duration'), '-', m.get('max_duration'))
+        print('price:', m.get('pricing'))"
+}
+```
+
+Free-lane previz: run the whole chain once at the cheapest grid first (Pollinations
+lowest duration, Novita 720P/2s, local 480×854) to validate journey + seams, then
+re-render finals — the same habit as the premium `mini` previz tier, at $0.
+
+### 8e. Fallback cascades — the free tier manages itself
+
+No single free provider survives contact with the catalog: models flip to `paid_only`,
+quotas exhaust, hosts go 503. So nothing calls a provider directly — everything goes
+through a cascade: an ordered list, first live+verified entry wins, per-clip failover,
+resume-safe. Order = cheapest-reliable first; edit the order, never the runners.
+
+```bash
+STILLS_CASCADE="pollflux pollmirror hfspace cf hf sf local"
+CHAIN_CASCADE="novita pollflf localflf"     # full A+B (needs end-frame)
+LEG_CASCADE="pollaonly novita-first sflocal" # arch-A legs (start-frame only)
+
+# live probe: is this Pollinations model free AND capable? (need = image|start_frame|end_frame)
+poll_cap() { # model need
+  curl -fsSL --max-time 20 https://gen.pollinations.ai/image/models 2>/dev/null | python3 -c "
+import json,sys
+want=sys.argv[1]; need=sys.argv[2]; ok=False
+try:
+    for m in json.load(sys.stdin):
+        if m.get('name')==want or want in (m.get('aliases') or []):
+            if m.get('paid_only'): break
+            if need=='image' and m.get('category')=='image': ok=True
+            if need in (m.get('video_capabilities') or []): ok=True
+            break
+except Exception: pass
+print('ok' if ok else 'no')" "$1" "$2" 2>/dev/null
+}
+need_key() { [ -n "$1" ]; }   # need_key "$POLLINATIONS_KEY" || continue
+verify_still() { [ -s "$1" ] && ffprobe -v error -show_entries stream=width -of csv=p=0 "$1" >/dev/null 2>&1; }
+comfy_live() { curl -fsSL --max-time 10 "$COMFY/system_stats" >/dev/null 2>&1; }
+
+# pre-flight: print which lanes are alive (run at Step 0, show the user only live lanes)
+detect_backends() {
+  echo "== backend autodetect =="
+  need_key "$POLLINATIONS_KEY" \
+    && echo "pollinations: KEY (stills + video per live flags)" \
+    || echo "pollinations: no key (keyless hfspace stills only)"
+  python3 -c "import gradio_client" 2>/dev/null && echo "hfspace: READY (keyless schnell)" || echo "hfspace: pip install gradio_client"
+  need_key "$CLOUDFLARE_API_TOKEN" && echo "cloudflare: READY" || echo "cloudflare: no token"
+  need_key "$HF_TOKEN" && echo "huggingface: READY" || echo "huggingface: no token"
+  need_key "$SILICONFLOW_API_KEY" && echo "siliconflow: READY" || echo "siliconflow: no key"
+  need_key "$NOVITA_API_KEY" && echo "novita: READY (trial meter)" || echo "novita: no key"
+  python3 -c "import diffusers, torch; assert torch.cuda.is_available()" 2>/dev/null \
+    && echo "local: GPU READY" || echo "local: no GPU (lane unavailable)"
+  comfy_live && echo "comfyui: LIVE ($COMFY)" || echo "comfyui: down"
+  [ "$(poll_cap flux image)" = "ok" ] && echo "poll/flux: FREE+LIVE" || echo "poll/flux: DOWN/PAID (mirrors next)"
+}
+
+# run_still <name> <seed> — first verified PNG wins; finished clips are skipped (resume-safe)
+run_still() {
+  verify_still "$WORK/still_$1.png" && { echo "still $1 cached"; return 0; }
+  for b in $STILLS_CASCADE; do
+    case $b in
+      pollflux)   need_key "$POLLINATIONS_KEY" || continue
+                  [ "$(poll_cap "${POLL_IMAGE_MODEL:-flux}" image)" = "ok" ] || continue
+                  retry3 2 gen_still_poll "$1" "$2" || continue ;;
+      pollmirror) need_key "$POLLINATIONS_KEY" || continue
+                  for m in community/MarcosFRG/flux-1-schnell community/CloudCompile/flux-2-klein-4b community/CloudCompile/sdxl-lightning; do
+                    [ "$(poll_cap "$m" image)" = "ok" ] || continue
+                    POLL_IMAGE_MODEL="$m" retry3 2 gen_still_poll "$1" "$2" && break
+                  done ;;
+      hfspace)    retry3 2 gen_still_hfspace "$1" "$2" || continue ;;
+      cf)         need_key "$CLOUDFLARE_API_TOKEN" || continue
+                  retry3 2 gen_still_cf "$1" || continue ;;
+      hf)         need_key "$HF_TOKEN" || continue
+                  retry3 2 gen_still_hf "$1" "$2" || continue ;;
+      sf)         need_key "$SILICONFLOW_API_KEY" || continue
+                  retry3 2 gen_still_sf "$1" "$2" || continue ;;
+      local)      retry3 1 gen_still_local "$1" "$2" || continue ;;
+    esac
+    if verify_still "$WORK/still_$1.png"; then note "still_$1.png" "still:$b"; echo "still $1 ok (cascade: $b)"; return 0; fi
+    echo "still $1 via $b unverified — failing over" >> "$WORK/retry.log"
+  done
+  echo "still $1 FAIL (cascade exhausted)"; return 1
+}
+
+# run_chain_clip <outMp4> <startPng> <endPng> <promptTxt> <dur> — connectors/legs with end-frames
+run_chain_clip() {
+  verify_clip "$1" "$5" 2>/dev/null && { echo "clip $1 cached"; return 0; }
+  for b in $CHAIN_CASCADE; do
+    case $b in
+      novita) need_key "$NOVITA_API_KEY" || continue
+              retry3 2 gen_novita "$1" "$2" "$3" "$4" "$5" 1080P || continue ;;
+      pollflf) need_key "$POLLINATIONS_KEY" || continue
+              [ "$CAP" = "CHAIN" ] && [ "$(poll_cap "$POLL_MODEL" end_frame)" = "ok" ] || continue
+              retry3 2 gen_conn_poll_chain "$1" "$2" "$3" "$4" "$5" || continue ;;
+      localflf) comfy_live || continue
+              retry3 1 gen_flf_local "$1" "$2" "$3" "$4" || continue ;;
+    esac
+    if verify_clip "$1" "$5"; then note "$(basename "$1")" "chain:$b"; echo "clip $1 ok (cascade: $b)"; return 0; fi
+    echo "clip $1 via $b unverified — failing over" >> "$WORK/retry.log"
+  done
+  echo "clip $1 FAIL (chain cascade exhausted — downgrade to arch A? confirm with user)"; return 1
+}
+
+# run_leg <outMp4> <startPng> <promptTxt> <dur> — arch-A legs (start-frame only backends)
+run_leg() {
+  verify_clip "$1" "$4" 2>/dev/null && { echo "leg $1 cached"; return 0; }
+  for b in $LEG_CASCADE; do
+    case $b in
+      pollaonly) need_key "$POLLINATIONS_KEY" || continue
+              [ "$(poll_cap "$POLL_MODEL" start_frame)" = "ok" ] || continue
+              retry3 2 gen_leg_poll "$1" "$2" "$3" "$4" || continue ;;
+      novita-first) need_key "$NOVITA_API_KEY" || continue
+              retry3 2 gen_novita "$1" "$2" "" "$3" "$4" 1080P || continue ;;
+      sflocal) comfy_live || continue
+              retry3 1 gen_flf_local "$1" "$2" "" "$3" || continue ;;
+    esac
+    if verify_clip "$1" "$4"; then note "$(basename "$1")" "leg:$b"; echo "leg $1 ok (cascade: $b)"; return 0; fi
+    echo "leg $1 via $b unverified — failing over" >> "$WORK/retry.log"
+  done
+  echo "leg $1 FAIL (leg cascade exhausted)"; return 1
+}
+```
+
+Two small adapters the cascades assume (single-purpose, no logic changes elsewhere):
+
+```bash
+# dive/leg over Pollinations with explicit out/start/prompt/dur (wraps §8b for the cascade)
+gen_leg_poll() { # outMp4 startPng promptTxt dur
+  furl=$(poll_frame_url "$2"); [ -n "$furl" ] || return 1
+  curl -fsSL --get "https://gen.pollinations.ai/video/$(python3 -c "import urllib.parse;print(urllib.parse.quote(open('$3').read()))")" \
+    --data-urlencode "model=$POLL_MODEL" --data-urlencode "duration=$4" \
+    --data-urlencode "aspectRatio=$ASPECT" --data-urlencode "image=$furl" --data-urlencode "audio=false" \
+    -H "Authorization: Bearer $POLLINATIONS_KEY" -o "$1" \
+    && echo "leg ok (poll/$POLL_MODEL)" || { echo "leg FAIL"; return 1; }
+}
+# connector over Pollinations with explicit out/start/end/prompt/dur (CAP=CHAIN enforced)
+gen_conn_poll_chain() { # outMp4 startPng endPng promptTxt dur
+  [ "$CAP" = "CHAIN" ] || return 1
+  su=$(poll_frame_url "$2"); eu=$(poll_frame_url "$3"); [ -n "$su" ] && [ -n "$eu" ] || return 1
+  curl -fsSL --get "https://gen.pollinations.ai/video/$(python3 -c "import urllib.parse;print(urllib.parse.quote(open('$4').read()))")" \
+    --data-urlencode "model=$POLL_MODEL" --data-urlencode "duration=$5" \
+    --data-urlencode "aspectRatio=$ASPECT" --data-urlencode "image=$su|$eu" --data-urlencode "audio=false" \
+    -H "Authorization: Bearer $POLLINATIONS_KEY" -o "$1" \
+    && echo "conn ok (poll/$POLL_MODEL)" || { echo "conn FAIL"; return 1; }
+}
+```
+
+Re-probe triggers (when the cascade re-checks the catalog instead of trusting cache):
+a provider failing twice in a row, any `paid_only`/402/BLOCKED response, any 429 burst,
+or a new build day. Cross-CAP downgrade (CHAIN→A-ONLY mid-build) is the one failover
+that is NOT automatic — it changes the film's grammar, so confirm with the user first
+(SKILL Step 4 rule); everything within a CAP fails over silently and is reported via
+the manifest.
+
 ## Notes
 
 - `.[0].result_url` is the field on the `--wait --json` job object. `.min_result_url` is
