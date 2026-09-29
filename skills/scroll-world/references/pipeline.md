@@ -558,8 +558,8 @@ resume-safe. Order = cheapest-reliable first; edit the order, never the runners.
 
 ```bash
 STILLS_CASCADE="pollflux pollmirror hfspace cf hf sf local"
-CHAIN_CASCADE="novita pollflf localflf"     # full A+B (needs end-frame)
-LEG_CASCADE="pollaonly novita-first sflocal" # arch-A legs (start-frame only)
+CHAIN_CASCADE="pollflf zerogpu_flf novita localflf"     # full A+B (needs end-frame)
+LEG_CASCADE="pollaonly zerogpu_start novita-first sflocal" # arch-A legs (start-frame only)
 
 # live probe: is this Pollinations model free AND capable? (need = image|start_frame|end_frame)
 # Prints ok:free | no:<reason> (paid_only, missing-cap, unknown-model, catalog-error).
@@ -699,6 +699,7 @@ run_chain_clip() {
     case $b in
       novita) need_key "$NOVITA_API_KEY" || continue
               retry3 2 gen_novita "$1" "$2" "$3" "$4" "$5" 1080P || continue ;;
+      zerogpu_flf) run_zerogpu "$1" "$2" "$3" "$4" flf || continue ;;   # §8g, $0
       pollflf) need_key "$POLLINATIONS_KEY" || continue
               case "$(poll_cap "$POLL_MODEL" end_frame)" in ok*) [ "$CAP" = "CHAIN" ] || continue;; *) continue;; esac
               retry3 2 gen_conn_poll_chain "$1" "$2" "$3" "$4" "$5" || continue ;;
@@ -719,6 +720,7 @@ run_leg() {
       pollaonly) need_key "$POLLINATIONS_KEY" || continue
               case "$(poll_cap "$POLL_MODEL" start_frame)" in ok*) ;; *) continue;; esac
               retry3 2 gen_leg_poll "$1" "$2" "$3" "$4" || continue ;;
+      zerogpu_start) run_zerogpu "$1" "$2" "" "$3" start || continue ;;  # §8g, $0
       novita-first) need_key "$NOVITA_API_KEY" || continue
               retry3 2 gen_novita "$1" "$2" "" "$3" "$4" 1080P || continue ;;
       sflocal) comfy_live || continue
@@ -763,6 +765,129 @@ that is NOT automatic — it changes the film's grammar, so confirm with the use
 the manifest.
 
 ### 8f. Synthetic previz lane — $0, zero-dep, sanctioned (NOT final art)
+
+When no video lane is live (or before spending anything anywhere), validate the whole
+page — journey, pacing, seams, QA — with synthetic push-in stand-ins rendered from the
+real stills. This is an explicit previz step, not a hack: same durations, same §5
+scrub encodes, same engine wiring (`connectors: []`, arch A). The journey it validates
+translates directly to the final render. Verified 2026-09-15: 8.0 s, 1920×1080,
+~5 MB, gentle push-in (frame-diff 0.06). NEVER ship these as the final film without
+telling the user they are synthetic — filename them `standin_*`, record them as such
+in the manifest, and replace with the real chain when a lane goes live.
+
+```bash
+# standin <name> — slow push-in over the scene still, then the §5 scrub encode.
+standin() { # name (uses $DIVE_DUR snapped to whole seconds)
+  ffmpeg -v error -y -loop 1 -i "$WORK/still_$1.png" -vf \
+    "scale=3072:-2,zoompan=z='1+0.06*on/($DIVE_DUR*24)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=$((DIVE_DUR*24)):s=1920x1080:fps=24" \
+    -t "$DIVE_DUR" -c:v libx264 -pix_fmt yuv420p "$WORK/standin_$1.raw.mp4"
+  enc "$WORK/standin_$1.raw.mp4" "$ASSETS/vid/$1.mp4"   # §5 encoder: -g 8, crf 20, faststart
+}
+for n in $NAMES; do standin "$n"; done
+```
+
+### 8g. HF ZeroGPU Spaces — free video chain, no API key (verified 2026-09-29)
+
+Public Wan 2.2 spaces on free GPUs, driven with `pip install gradio_client`. Quota is
+**declared GPU-seconds**: 2 min/day unauth, 5 min/day free account (reset 24 h after
+first use) — a per-clip lane, and the free account (Step 0.11 key onboarding) is what
+makes a chain possible. `api_name` needs the leading slash or the client raises
+`Cannot find a function with api_name`.
+
+```bash
+pip install gradio_client        # once
+
+# zerogpu_quota — declared-seconds math for a clip (not wall clock)
+ZGPU_SEC() { case "$1" in
+  start) echo 30 ;;      # wan2-2-fp8da-aoti-faster: cheap per clip
+  flf)   echo 60 ;;      # r3gm/...-aoti-preview: lowest-declared FLF
+  flf_hq) echo 180 ;;    # multimodalart FLF2V: most of a free day — escalation only
+esac; }
+
+# run_zerogpu <outMp4> <startPng> <endPngOrEmpty> <promptTxt> [start|flf|flf_hq]
+# On quota exhaustion it prints the reset time and returns 2 (park, resume later).
+run_zerogpu() {
+  case "$5" in
+    start)  SPACE=zerogpu-aoti/wan2-2-fp8da-aoti-faster ;;
+    flf)    SPACE=r3gm/wan2-2-fp8da-aoti-preview ;;
+    flf_hq) SPACE=multimodalart/wan-2-2-first-last-frame ;;
+  esac
+  OUT="$1" START="$2" END="$3" PROMPT="$4" MODE="$5" python3 -c "
+import os, shutil, re, sys
+from gradio_client import Client, handle_file
+out=os.environ['OUT']; mode=os.environ['MODE']
+kw = dict(prompt=open(os.environ['PROMPT']).read(), steps=4,
+         negative_prompt='blur, distort, watermark, text, logo', seed=42,
+         randomize_seed=False, api_name='/generate_video')
+if mode == 'start':
+    # zerogpu-aoti/wan2-2-fp8da-aoti-faster: start-frame only (A-ONLY)
+    p, _ = Client('zerogpu-aoti/wan2-2-fp8da-aoti-faster').predict(
+        input_image=handle_file(os.environ['START']), duration_seconds=1.0, **kw)
+    shutil.copy(p, out)
+else:
+    # FLF: give BOTH ends — this is what holds the seam
+    p, _ = Client('r3gm/wan2-2-fp8da-aoti-preview' if mode=='flf'
+                  else 'multimodalart/wan-2-2-first-last-frame').predict(
+        input_image=handle_file(os.environ['START']),
+        last_image=handle_file(os.environ['END']), **kw)
+    shutil.copy(p if isinstance(p, str) else p['video'], out)
+print('zerogpu ok', mode)" 2>&1 | tee /tmp/zgpu.err
+  if grep -q 'exceeded your free ZeroGPU quota' /tmp/zgpu.err; then
+    echo "zerogpu: quota exhausted — reset $(grep -o 'Try again in [0-9:]*' /tmp/zgpu.err | head -1 | cut -d' ' -f4); park and resume"; return 2; fi
+  [ -s "$1" ] && verify_clip "$1" 1 && note "$(basename "$1")" "zerogpu:$SPACE" || return 1
+}
+# arch-A legs: run_zerogpu "$WORK/dive_$n.mp4" still_$n.png "" "$WORK/dive_$n.txt" start
+# connectors (CHAIN):  run_zerogpu "$WORK/conn_$i.mp4" last_$prev.png first_$n.png "$WORK/conn_$i.txt" flf
+```
+
+Free ZeroGPU is best as the **qualification + first-clip proof** and a per-seam lane;
+for a full N=6 chain on one day's 5 min budget prefer a metered lane (Pollinations /
+Novita) or BYO-video. Already registered in the §8e cascade defaults (`zerogpu_flf` / `zerogpu_start`).
+
+### 8h. BYO-video — the user generates, you guide, ingest, finish
+
+For any tool the user already has (ChatGPT/Sora, Kling, Veo, Runway, Pika, a phone,
+local ComfyUI) or when nothing is scriptable. No key, no API, no quota. You produce
+a **clip sheet**; they return files; you do the frame/QA/wire work.
+
+```bash
+# 1. emit a per-clip sheet: exact prompt + the start (and for connectors, end) frame
+byo_sheet() { # <name> <promptFile> <startPng> [endPng]
+  echo "### $1 — paste into your tool"
+  echo "-- START frame: $3   (upload this as the first frame)"
+  [ -n "$4" ] && echo "-- END frame:   $4   (upload this as the end frame / anchor)"
+  echo "-- PROMPT:"; cat "$2"; echo
+}
+# 2. user drops rendered mp4s here (any tool, any fps/res):
+mkdir -p "$WORK/inbox"
+# 3. ingest + normalize into the chain (frame law preserved: boundary frames are
+#    re-extracted from what they actually rendered, so the seam law still holds)
+ingest_byo() { # inboxFile outMp4
+  ffmpeg -v error -y -i "$1" -an -vf "scale=-2:1080,unsharp=5:5:0.8:5:5:0.0" \
+    -c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p \
+    -g 8 -keyint_min 8 -sc_threshold 0 -movflags +faststart "$2" \
+    && verify_clip "$2" 3 && note "$(basename "$2")" "byo-video" || echo "ingest $2 FAIL"
+}
+```
+
+Rules: the user keeps creative control; you keep the seam law (extract boundary frames
+from their render, not the stills, before connectors). If their tool can't take an end
+frame, that's A-ONLY — chain legs from their last frames. Re-rolls are the user's
+clips; ask them to re-roll, don't silently substitute. Comfy Cloud (400 free credits,
+web-only, no free API) and Google Flow/Veo and Pika are all valid BYO targets for
+this lane.
+
+### 8i. BYO-session — their login, their browser (no cookie path, by design)
+
+If the user is signed into a hosted tool in their own browser, the sanctioned flow is
+**BYO-video (§8h)**: you hand over prompts + frames, they render, they return files.
+This skill will not read, copy, inject, replay, or request browser cookies, session
+tokens, refresh tokens, or passwords — that is a full-account credential, it usually
+breaks a provider's ToS, and it turns a build tool into a credential-harvesting tool.
+If the user wants the tool fully automated against that account, point them at the
+provider's own API-key step (Step 0.11 key card) and take the key instead.
+
+ — $0, zero-dep, sanctioned (NOT final art)
 
 When no video lane is live (or before spending anything anywhere), validate the whole
 page — journey, pacing, seams, QA — with synthetic push-in stand-ins rendered from the

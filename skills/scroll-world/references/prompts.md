@@ -39,9 +39,12 @@ Collect and write down:
   SiliconFlow keys; Novita wan2.7-i2v as the trial CHAIN backend) | premium (Monid
   USD / Higgsfield credits). Record with it the `CAP` flag (CHAIN vs A-ONLY vs
   TRIAL-CHAIN, read off the live catalog) — it gates arch A vs B unconditionally.
-- `KEYS` — per-lane key status from Step 0.9 onboarding: which lanes are keyed +
+- `KEYS` — per-lane key status from Step 0.11 onboarding: which lanes are keyed +
   validated (confirm with last-4 only), which were declined and what they fell back
-  to. Never record key material itself.
+  to. Never record key material itself. Never record session/cookie material — it is
+  never requested.
+- `BYO` — if the BYO-video lane is used: which tool the user renders in, which
+  clips are outstanding in `$WORK/inbox/`, and which are ingested so far.
 
 ## Style preamble (default: clay diorama)
 

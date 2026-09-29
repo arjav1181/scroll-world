@@ -52,6 +52,12 @@ Pick a lane — the skill interviews you for the stack before anything renders:
   key (`POLLINATIONS_KEY`) — stills (`flux`, 1536×1024) + video off the live catalog
   (free-tier video is usually start-frame-only, which pairs with the connector-free
   architecture A). Costs Pollen/rate-limits, not money.
+- **Free video, no API key:** public Hugging Face ZeroGPU spaces running Wan 2.2
+  (start-frame and first+last-frame) — real generations, $0, but metered in *declared
+  GPU-seconds* per day (a per-clip lane, not a batch lane). Needs `gradio_client`.
+- **Bring-your-own video:** no key, no quota — the skill writes the exact prompts and
+  start/end frames, you render them in whatever tool you already have, and the skill
+  ingests, encodes, wires and QA-tests the results.
 - **Local open ($0 forever, optional, needs GPU):** Python 3 + `diffusers`/`transformers`
   (FLUX.1-schnell / SDXL stills) and ComfyUI + Wan-FLF2V (full start+end-frame chain).
 - **Cheap trials (keys, no card):** Cloudflare Workers AI, Hugging Face, SiliconFlow/Novita.

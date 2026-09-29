@@ -124,7 +124,40 @@ not the framework.
       LTX-Video keyframes. SVD/AnimateDiff are start-frame-only → architecture A only.
     If no GPU is present, say so and steer to the free hosted lane — don't attempt
     local video on CPU.
-9. **Key onboarding — you ask, teach, use, in that order.** Missing keys are a
+9. **HF ZeroGPU Spaces — the free video chain that actually works, no API key**
+   (verified 2026-09-29 by running them: public Wan 2.2 spaces on free GPUs, called
+   with `gradio_client`). Quota is **declared GPU-seconds, not wall clock**: 2 min/day
+   unauthenticated, 5 min/day on a free account (reset 24 h after first use), so this
+   is a **seam-by-seam lane, not a batch lane** — a whole N=6 chain needs a free HF
+   account and careful budgeting, or a paid/other lane. Roster (all running, all
+   `hardware=zero-a10g` at check):
+   - `zerogpu-aoti/wan2-2-fp8da-aoti-faster` — start-frame only, cheapest
+     (A-ONLY). `/generate_video`.
+   - `r3gm/wan2-2-fp8da-aoti-preview` — **start + last frame** (`input_image` +
+     `last_image`) → full CHAIN on the free tier. Also `/extract_frame` to pull a
+     seam frame back out. Lowest declared cost of the FLF spaces — make this the
+     default free chain lane.
+   - `multimodalart/wan-2-2-first-last-frame` — FLF, clean schema, but declares
+     **180 s per call** = most of a free day's budget. Quality escalation only.
+   - `linoyts/LTX-2-3-First-Last-Frame` — FLF (+audio) backup.
+   Commands in pipeline.md §8g. A ZeroGPU quota-exceeded error is a **normal state,
+   not a bug** — parse the "Try again in HH:MM:SS" it returns, park, and resume.
+10. **BYO lanes — the user drives, you assist.** Two variants, both first-class:
+   - **BYO-video (recommended escape hatch, any tool):** you write the exact
+     prompts + the start/end frame PNGs + the frame law; the user pastes them into
+     whatever they already pay for (ChatGPT/Sora, Kling, Veo, Runway, Pika, a local
+     ComfyUI, a phone) and drops the files back in `$WORK/inbox/`. You extract
+     boundary frames, encode, wire, and QA as usual. Full procedure in pipeline.md
+     §8h — this lane needs no key, no API, and no quota, and it's the honest answer
+     when a user already has a subscription or wants manual control. Ask for it
+     whenever no scriptable lane is live and the user mentions a tool they use.
+   - **BYO-session (their account, their login):** the user is signed into a hosted
+     tool in *their own browser*. You do **not** read, copy, inject, or ask for their
+     cookies, session tokens, or credentials — ever. Instead the BYO-video loop is
+     the sanctioned path (paste prompts, return files), or they create a proper API
+     key via Step 0.11 and hand *that* over. There is no cookie-auth path in this
+     skill by design.
+11. **Key onboarding — you ask, teach, use, in that order.** Missing keys are a
     conversation, not a dead end. Flow:
     1. `detect_backends` first — know what's live before asking for anything.
     2. When the chosen lane needs a missing key, teach it with the key card below:
@@ -152,6 +185,14 @@ not the framework.
     into repo files, prompts, logs, or the manifest (record the lane, never the
     secret); never print more than the last 4 characters; rotate/revoke at the
     provider if one ever lands in a file or transcript you don't control.
+    **Never handle a session credential.** Do not read, copy, inject, replay, or ask
+    for a user's browser cookies, session tokens, refresh tokens, or login
+    passwords — not "just to reuse their existing session." Those are full-account
+    credentials, they typically breach the provider's terms, and a build tool that
+    harvests them is a security liability for the user. The user's existing account
+    is reached through BYO-video (Step 0.10) or a real API key (Step 0.11), never
+    through their cookies. If a user volunteers session material, decline it and
+    point them at the key path.
 
 ---
 
@@ -249,13 +290,23 @@ default. Cover:
        ends). Check VRAM first (14B fp8 ≈ 15 GB; 480×854 fallback below that); no
        GPU → steer back to free hosted, never attempt local video on CPU.
      - **Cheap trials (keys, no card):** Cloudflare (stills, ~10k Neurons/day),
-       Hugging Face (stills top-up), SiliconFlow (one-time credit; video is
+       Hugging Face (stills top-up, and the free account that unlocks the ZeroGPU
+       video chain below), SiliconFlow (one-time credit; video is
        start-only → arch A), Novita wan2.7-i2v (start+END frames on trial credit —
        the only trial full-chain backend). Good as stills upgrades or short-chain experiments.
+     - **HF ZeroGPU Spaces ($0, no key — scriptable free video chain):** public Wan
+       2.2 spaces on free GPUs; `r3gm/wan2-2-fp8da-aoti-preview` takes start+END
+       frames, so a real chain is possible free. Quota is declared GPU-seconds
+       (5 min/day on a free account) — a per-clip lane, not a batch lane. Offer it
+       with the honest ceiling: N scenes × (2N−1) clips will not fit one day.
+     - **BYO-video (you drive, I guide):** no key, no quota, any tool the user
+       already has — I hand over exact prompts + start/end frames, they render and
+       drop the files back, I finish the page. Best answer when nothing is
+       scriptable, and the only lane that needs no account at all.
      - **Premium (paid):** Monid per-clip USD (default paid lane) / Higgsfield
        credits fallback — the roster below, fastest wall-clock, highest fidelity.
       Record `BACKEND` + provider/model + its `CAP` capability flag (Step 4 —
-      CHAIN vs A-ONLY, read off the live catalog; Step 0.7–0.9 for free auth +
+      CHAIN vs A-ONLY, read off the live catalog; Step 0.7–0.11 for free auth, ZeroGPU, BYO +
       key onboarding); record key status as `KEYS` (prompts.md).
       Every later step keys off them.
      Capability flags gate the architecture (Step 4): a start-frame-only video
@@ -956,9 +1007,21 @@ is the thing most likely to be wrong:
   weights. One provider+model for the whole chain still applies — if the mirror
   changes mid-build, restart the chain on the new one or finish on it only after
   eyeballing a seam, same as any model swap.
-- **HF Space still 429s / stalls mid-batch** → ZeroGPU daily quota spent (~2 min
-  unauth, ~5 min free account). Add `HF_TOKEN` (raises quota), wait for reset, or
-  switch the batch to Pollinations `flux`/Cloudflare — the prompt files are identical.
+ - **HF Space still 429s / stalls mid-batch** → ZeroGPU daily quota spent (~2 min
+   unauth, ~5 min free account). Add `HF_TOKEN` (raises quota), wait for reset, or
+   switch the batch to Pollinations `flux`/Cloudflare — the prompt files are identical.
+ - **ZeroGPU "exceeded your free ZeroGPU quota (180s requested vs 156s left)"** →
+   not an error — it's the quota model (declared GPU-seconds, not wall clock), and
+   180 s = most of a free day. Parse the "Try again in HH:MM:SS", park the run,
+   resume after reset, and prefer the cheaper `r3gm` FLF space (60 s) over the
+   180 s `multimodalart` one. One 832×480 clip per call at these settings — the
+   real 1080p film needs a metered lane or BYO-video.
+ - **`Cannot find a function with api_name: generate_video`** → Gradio needs the
+   leading slash: `api_name='/generate_video'`. Also copy the output out of
+   `/tmp/gradio/...` immediately — it's ephemeral server-side.
+ - **User asks you to "reuse my cookies / logged-in session"** → decline; use
+   BYO-video (they render, you finish) or a real API key. Never request, read, or
+   replay session material (Step 0.11 hygiene).
 - **uguu.se link dead at video time** → files expire in ~3h. Upload-then-use inside
   the same phase; never upload all frames up front for a build that renders tomorrow.
   (0x0.st 503, catbox 412/403, tmpfiles HTML-wrapped, transfer.sh down — all verified
